@@ -153,7 +153,7 @@ def get_args():
     parser.add_argument('--model', default='PreActResNet18')
     parser.add_argument('--batch-size', default=128, type=int)
     parser.add_argument('--data-dir', default='../cifar-data', type=str)
-    parser.add_argument('--epochs', default=53, type=int)
+    parser.add_argument('--epochs', default=52, type=int)
     parser.add_argument('--lr-schedule', default='piecewise', choices=['superconverge', 'piecewise'])
     parser.add_argument('--piecewise-lr-drop', default=50, type=int)
     parser.add_argument('--lr-max', default=0.1, type=float)
@@ -161,7 +161,7 @@ def get_args():
     parser.add_argument('--epsilon', default=8, type=int)
     parser.add_argument('--pgd-alpha', default=2, type=float)
     parser.add_argument('--fgsm-alpha', default=2, type=float)
-    parser.add_argument('--c-samps', default=2, type=int)
+    parser.add_argument('--c-samps', default=3, type=int)
     parser.add_argument('--c-th', default=-1, type=int)
     parser.add_argument('--c-parallel', action='store_true')
     parser.add_argument('--q_val', default=0.4, type=float)
@@ -299,7 +299,7 @@ def main():
         test_n = 0
         attack_mean = 0
         for i, batch in enumerate(test_batches):
-            if not args.full_test and i > len(test_batches) / 10:
+            if not epoch+1==epochs and not args.full_test and i > len(test_batches) / 10:
                 break
             X, y = batch['input'], batch['target']
 
