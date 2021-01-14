@@ -156,12 +156,12 @@ def get_args():
     parser.add_argument('--epochs', default=53, type=int)
     parser.add_argument('--lr-schedule', default='piecewise', choices=['superconverge', 'piecewise'])
     parser.add_argument('--piecewise-lr-drop', default=50, type=int)
-    parser.add_argument('--lr-max', default=0.2, type=float)
+    parser.add_argument('--lr-max', default=0.1, type=float)
     parser.add_argument('--attack', default='cfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm'])
     parser.add_argument('--epsilon', default=8, type=int)
     parser.add_argument('--pgd-alpha', default=2, type=float)
     parser.add_argument('--fgsm-alpha', default=2, type=float)
-    parser.add_argument('--c-samps', default=3, type=int)
+    parser.add_argument('--c-samps', default=2, type=int)
     parser.add_argument('--c-th', default=-1, type=int)
     parser.add_argument('--c-parallel', action='store_true')
     parser.add_argument('--q_val', default=0.4, type=float)
@@ -232,7 +232,7 @@ def main():
         lr_schedule = lambda t: np.interp([t], [0, args.epochs * 2 // 5, args.epochs], [0, args.lr_max, 0])[0]
     elif args.lr_schedule == 'piecewise':
         def lr_schedule(t):
-            if t / args.epochs < args.piecewise_lr_drop:
+            if t < args.piecewise_lr_drop:
                 return args.lr_max
             else:
                 return args.lr_max / 10.
