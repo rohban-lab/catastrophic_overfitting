@@ -376,9 +376,8 @@ def main():
                 test_acc += (output.max(1)[1] == y).sum().item()
                 test_n += y.size(0)
             
-            logger.info('PGD50 \t %.1f \t \t %.1f \t \t %.4f \t %.4f \t \t %.4f \t \t %.4f \t %.4f \t %.4f \t \t %.4f',
-                -1, time.time() - start_test_time, -1,
-                -1, -1,
+            logger.info('PGD50 \t time: %.1f,\t clean loss: %.4f,\t clean acc: %.4f,\t robust loss: %.4f,\t robust acc: %.4f',
+                time.time() - start_test_time,
                 test_loss/test_n, test_acc/test_n, test_robust_loss/test_n, test_robust_acc/test_n)
             return
         
