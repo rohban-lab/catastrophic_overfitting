@@ -164,7 +164,7 @@ def get_args():
     parser.add_argument('--c-samps', default=3, type=int)
     parser.add_argument('--c-th', default=-1, type=int)
     parser.add_argument('--c-parallel', action='store_true')
-    parser.add_argument('--q_val', default=0.4, type=float)
+    parser.add_argument('--q-val', default=0.4, type=float)
     parser.add_argument('--fgsm-init', default='random', type=str, choices=['zero', 'random'])
     parser.add_argument('--fname', default='cifar_model', type=str)
     parser.add_argument('--seed', default=0, type=int)
