@@ -170,6 +170,8 @@ def get_args():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--width-factor', default=10, type=int)
     parser.add_argument('--full-test', action='store_true')
+    parser.add_argument('--test-iters', default=10, type=int)
+    parser.add_argument('--test-restarts', default=1, type=int)
     parser.add_argument('--resume', default=0, type=int)
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--chkpt-iters', default=10, type=int)
@@ -206,8 +208,7 @@ def main():
     train_batches = Batches(train_set_x, args.batch_size, shuffle=True, set_random_choices=True, num_workers=2)
 
     test_set = list(zip(transpose(dataset['test']['data']/255.), dataset['test']['labels']))
-    test_set_x = Transform(test_set, [])
-    test_batches = Batches(test_set_x, args.batch_size, shuffle=True, set_random_choices=True, num_workers=2)
+    test_batches = Batches(test_set, args.batch_size, shuffle=False, num_workers=2)
 
     epsilon = (args.epsilon / 255.)
     pgd_alpha = (args.pgd_alpha / 255.)
@@ -298,12 +299,16 @@ def main():
         test_robust_acc = 0
         test_n = 0
         attack_mean = 0
-        for i, batch in enumerate(test_batches):
-            if not epoch+1==epochs and not args.full_test and i > len(test_batches) / 10:
+        if not epoch+1==epochs and not args.full_test:
+            cur_dataset = train_batches
+        else :
+            cur_dataset = test_batches
+        for i, batch in enumerate(cur_dataset):
+            if not epoch+1==epochs and not args.full_test and i > len(cur_dataset) / 50:
                 break
             X, y = batch['input'], batch['target']
 
-            delta = attack_pgd(model, X, y, epsilon, pgd_alpha, 10, 1, 'l_inf', early_stop=args.eval)
+            delta = attack_pgd(model, X, y, epsilon, pgd_alpha, args.test_iters, args.test_restarts, 'l_inf', early_stop=args.eval)
             delta = delta.detach()
 
             robust_output = model(normalize(torch.clamp(X + delta[:X.size(0)], min=lower_limit, max=upper_limit)))
