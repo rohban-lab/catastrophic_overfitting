@@ -50,20 +50,22 @@ class Batches():
     def __len__(self):
         return len(self.dataloader)
 
-def quantile_fgsm(model, X, y, epsilon, alpha, q_val, fgsm_init):
+def quantile_fgsm(model, X, y, epsilon, alpha, q_val, q_iters, fgsm_init):
     delta = torch.zeros_like(X)
     if fgsm_init=='random':
         delta.uniform_(-epsilon, epsilon)
         delta = clamp(delta, lower_limit - X, upper_limit - X)
-    delta.requires_grad = True
-    output = model(normalize(X + delta))
-    F.cross_entropy(output, y).backward()
-    grad = delta.grad.detach()
-    q_grad = torch.quantile(torch.abs(grad).view(grad.size(0), -1), q_val, dim=1)
-    grad[torch.abs(grad) < q_grad.view(grad.size(0), 1, 1, 1)] = 0
-    d = torch.clamp(delta + alpha * torch.sign(grad), min=-epsilon, max=epsilon)
-    d = clamp(d, lower_limit - X, upper_limit - X)
-    return d.detach()
+    for i in range(q_iters):
+        delta.requires_grad = True
+        output = model(normalize(X + delta))
+        F.cross_entropy(output, y).backward()
+        grad = delta.grad.detach()
+        q_grad = torch.quantile(torch.abs(grad).view(grad.size(0), -1), q_val, dim=1)
+        grad[torch.abs(grad) < q_grad.view(grad.size(0), 1, 1, 1)] = 0
+        delta = torch.clamp(delta + alpha * torch.sign(grad), min=-epsilon, max=epsilon)
+        delta = clamp(delta, lower_limit - X, upper_limit - X)
+        delta = delta.detach()
+    return delta.detach()
 
 def consensus_fgsm(model, X, y, epsilon, alpha, samples, zeroing_th=-1, parallel=True):
     if zeroing_th==-1:
@@ -165,6 +167,7 @@ def get_args():
     parser.add_argument('--c-th', default=-1, type=int)
     parser.add_argument('--c-parallel', action='store_true')
     parser.add_argument('--q-val', default=0.4, type=float)
+    parser.add_argument('--q-iters', default=1, type=int)
     parser.add_argument('--fgsm-init', default='random', type=str, choices=['zero', 'random'])
     parser.add_argument('--fname', default='cifar_model', type=str)
     parser.add_argument('--seed', default=0, type=int)
@@ -276,7 +279,7 @@ def main():
             elif args.attack == 'cfgsm':
                 delta = consensus_fgsm(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.c_samps, args.c_th, args.c_parallel)
             elif args.attack == 'qfgsm':
-                delta = quantile_fgsm(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.q_val, args.fgsm_init)
+                delta = quantile_fgsm(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.q_val, args.q_iters, args.fgsm_init)
             delta = delta.detach()
             robust_output = model(normalize(torch.clamp(X + delta[:X.size(0)], min=lower_limit, max=upper_limit)))
             robust_loss = criterion(robust_output, y)
