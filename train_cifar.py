@@ -1,4 +1,4 @@
-# The code is base on https://github.com/locuslab/robust_overfitting (Rice et al.)
+# The code is based on https://github.com/locuslab/robust_overfitting (Rice et al.)
 
 import argparse
 import logging
@@ -28,7 +28,7 @@ std = torch.tensor(cifar10_std).view(3,1,1).cuda()
 def normalize(X):
     return (X - mu)/std
 
-upper_limit, lower_limit = 1,0
+upper_limit, lower_limit = 1, 0
 
 
 def clamp(X, lower_limit, upper_limit):
