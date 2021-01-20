@@ -1,3 +1,5 @@
+# The code is base on https://github.com/locuslab/robust_overfitting (Rice et al.)
+
 import argparse
 import logging
 import sys
@@ -159,22 +161,22 @@ def get_args():
     parser.add_argument('--lr-schedule', default='piecewise', choices=['superconverge', 'piecewise'])
     parser.add_argument('--piecewise-lr-drop', default=50, type=int)
     parser.add_argument('--lr-max', default=0.1, type=float)
-    parser.add_argument('--attack', default='cfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm'])
+    parser.add_argument('--attack', default='cfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
     parser.add_argument('--epsilon', default=8, type=int)
-    parser.add_argument('--pgd-alpha', default=2, type=float)
-    parser.add_argument('--fgsm-alpha', default=2, type=float)
-    parser.add_argument('--c-samps', default=3, type=int)
-    parser.add_argument('--c-th', default=-1, type=int)
-    parser.add_argument('--c-parallel', action='store_true')
-    parser.add_argument('--q-val', default=0.4, type=float)
-    parser.add_argument('--q-iters', default=1, type=int)
+    parser.add_argument('--pgd-alpha', default=2, type=float, help='pgd alpha WONT be multiplied by epsilon')
+    parser.add_argument('--fgsm-alpha', default=2, type=float, help='fgsm alpha WOULD be multiplied by epsilon')
+    parser.add_argument('--c-samps', default=3, type=int, help='number of random samples for counsensus-fgsm')
+    parser.add_argument('--c-th', default=-1, type=int, help='minimum number of same gradient directions to choose it in counsensus-fgsm')
+    parser.add_argument('--c-parallel', action='store_true', help='turn on for better performance on multiple GPUs, turn off if facing memory problems')
+    parser.add_argument('--q-val', default=0.4, type=float, help='quantile which gradients would become zero in quantile-fgsm')
+    parser.add_argument('--q-iters', default=1, type=int, help='number of quantile-fgsm iterations')
     parser.add_argument('--fgsm-init', default='random', type=str, choices=['zero', 'random'])
     parser.add_argument('--fname', default='cifar_model', type=str)
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--width-factor', default=10, type=int)
-    parser.add_argument('--full-test', action='store_true')
-    parser.add_argument('--test-iters', default=10, type=int)
-    parser.add_argument('--test-restarts', default=1, type=int)
+    parser.add_argument('--full-test', action='store_true', help='turn on to get test set evaluation in each epoch instead of validation set')
+    parser.add_argument('--test-iters', default=10, type=int, help='number of pgd steps used in evaluation during training')
+    parser.add_argument('--test-restarts', default=1, type=int, help='number of pgd restarts used in evaluation during training')
     parser.add_argument('--resume', default=0, type=int)
     parser.add_argument('--eval', action='store_true')
     parser.add_argument('--chkpt-iters', default=10, type=int)
@@ -280,6 +282,8 @@ def main():
                 delta = consensus_fgsm(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.c_samps, args.c_th, args.c_parallel)
             elif args.attack == 'qfgsm':
                 delta = quantile_fgsm(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.q_val, args.q_iters, args.fgsm_init)
+            elif args.attack == 'pgd':
+                delta = attack_pgd(model, X, y, epsilon, args.pgd_alpha, 10, 1, 'l_inf')
             delta = delta.detach()
             robust_output = model(normalize(torch.clamp(X + delta[:X.size(0)], min=lower_limit, max=upper_limit)))
             robust_loss = criterion(robust_output, y)
