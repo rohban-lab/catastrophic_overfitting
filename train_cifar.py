@@ -283,7 +283,7 @@ def main():
             elif args.attack == 'qfgsm':
                 delta = quantile_fgsm(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.q_val, args.q_iters, args.fgsm_init)
             elif args.attack == 'pgd':
-                delta = attack_pgd(model, X, y, epsilon, args.pgd_alpha, 10, 1, 'l_inf')
+                delta = attack_pgd(model, X, y, epsilon, pgd_alpha, 10, 1, 'l_inf')
             delta = delta.detach()
             robust_output = model(normalize(torch.clamp(X + delta[:X.size(0)], min=lower_limit, max=upper_limit)))
             robust_loss = criterion(robust_output, y)
