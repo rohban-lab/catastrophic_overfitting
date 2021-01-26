@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from torchvision import datasets, transforms
 
 import os
 
@@ -19,11 +20,11 @@ from preactresnet import PreActResNet18
 
 from utils import *
 
-cifar10_mean = (0.4914, 0.4822, 0.4465) # equals np.mean(train_set.train_data, axis=(0,1,2))/255
-cifar10_std = (0.2471, 0.2435, 0.2616) # equals np.std(train_set.train_data, axis=(0,1,2))/255
+svhn_mean = (0.5, 0.5, 0.5)
+svhn_std = (0.5, 0.5, 0.5)
 
-mu = torch.tensor(cifar10_mean).view(3,1,1).cuda()
-std = torch.tensor(cifar10_std).view(3,1,1).cuda()
+mu = torch.tensor(svhn_mean).view(3,1,1).cuda()
+std = torch.tensor(svhn_std).view(3,1,1).cuda()
 
 def normalize(X):
     return (X - mu)/std
@@ -156,22 +157,22 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='PreActResNet18')
     parser.add_argument('--batch-size', default=128, type=int)
-    parser.add_argument('--data-dir', default='../cifar-data', type=str)
+    parser.add_argument('--data-dir', default='../svhn-data', type=str)
     parser.add_argument('--epochs', default=52, type=int)
     parser.add_argument('--lr-schedule', default='piecewise', choices=['superconverge', 'piecewise'])
     parser.add_argument('--piecewise-lr-drop', default=50, type=int)
-    parser.add_argument('--lr-max', default=0.1, type=float)
-    parser.add_argument('--attack', default='cfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
+    parser.add_argument('--lr-max', default=0.01, type=float)
+    parser.add_argument('--attack', default='qfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
     parser.add_argument('--epsilon', default=8, type=int)
     parser.add_argument('--pgd-alpha', default=2, type=float, help='pgd alpha WONT be multiplied by epsilon')
     parser.add_argument('--fgsm-alpha', default=2, type=float, help='fgsm alpha WILL be multiplied by epsilon')
     parser.add_argument('--c-samps', default=3, type=int, help='number of random samples for counsensus-fgsm')
     parser.add_argument('--c-th', default=-1, type=int, help='minimum number of same gradient directions to choose it in counsensus-fgsm')
     parser.add_argument('--c-parallel', action='store_true', help='turn on for better performance on multiple GPUs, turn off if facing memory problems')
-    parser.add_argument('--q-val', default=0.4, type=float, help='quantile which gradients would become zero in quantile-fgsm')
+    parser.add_argument('--q-val', default=0.8, type=float, help='quantile which gradients would become zero in quantile-fgsm')
     parser.add_argument('--q-iters', default=1, type=int, help='number of quantile-fgsm iterations')
     parser.add_argument('--fgsm-init', default='random', type=str, choices=['zero', 'random'])
-    parser.add_argument('--fname', default='cifar_model', type=str)
+    parser.add_argument('--fname', default='svhn_model', type=str)
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--width-factor', default=10, type=int)
     parser.add_argument('--full-test', action='store_true', help='turn on to get test set evaluation in each epoch instead of validation set')
@@ -205,15 +206,33 @@ def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
 
-    transforms = [Crop(32, 32), FlipLR()]
-    dataset = cifar10(args.data_dir)
-    train_set = list(zip(transpose(pad(dataset['train']['data'], 4)/255.),
-        dataset['train']['labels']))
-    train_set_x = Transform(train_set, transforms)
-    train_batches = Batches(train_set_x, args.batch_size, shuffle=True, set_random_choices=True, num_workers=2)
-
-    test_set = list(zip(transpose(dataset['test']['data']/255.), dataset['test']['labels']))
-    test_batches = Batches(test_set, args.batch_size, shuffle=False, num_workers=2)
+    train_transform = transforms.Compose([
+        transforms.ToTensor(),
+        # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    ])
+    test_transform = transforms.Compose([
+        transforms.ToTensor(),
+        # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    ])
+    num_workers = 2
+    train_dataset = datasets.SVHN(
+        args.data_dir, split='train', transform=train_transform, download=True)
+    test_dataset = datasets.SVHN(
+        args.data_dir, split='test', transform=test_transform, download=True)
+    train_batches = torch.utils.data.DataLoader(
+        dataset=train_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        pin_memory=True,
+        num_workers=num_workers,
+    )
+    test_batches = torch.utils.data.DataLoader(
+        dataset=test_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        pin_memory=True,
+        num_workers=2,
+    )
 
     epsilon = (args.epsilon / 255.)
     pgd_alpha = (args.pgd_alpha / 255.)
@@ -269,10 +288,10 @@ def main():
         train_robust_acc = 0
         train_n = 0
         defence_mean = 0
-        for i, batch in enumerate(train_batches):
+        for i, (X, y) in enumerate(train_batches):
             if args.eval:
                 break
-            X, y = batch['input'], batch['target']
+            X, y = X.cuda(), y.cuda()
             lr = lr_schedule(epoch + (i + 1) / len(train_batches))
             opt.param_groups[0].update(lr=lr)
 
@@ -310,10 +329,10 @@ def main():
             cur_dataset = train_batches
         else :
             cur_dataset = test_batches
-        for i, batch in enumerate(cur_dataset):
+        for i, (X, y) in enumerate(cur_dataset):
             if not epoch+1==epochs and not args.full_test and i > len(cur_dataset) / 50:
                 break
-            X, y = batch['input'], batch['target']
+            X, y = X.cuda(), y.cuda()
 
             delta = attack_pgd(model, X, y, epsilon, pgd_alpha, args.test_iters, args.test_restarts, 'l_inf', early_stop=args.eval)
             delta = delta.detach()
@@ -370,8 +389,8 @@ def main():
             test_robust_loss = 0
             test_robust_acc = 0
             test_n = 0
-            for i, batch in enumerate(test_batches):
-                X, y = batch['input'], batch['target']
+            for i, (X, y) in enumerate(test_batches):
+                X, y = X.cuda(), y.cuda()
 
                 delta = attack_pgd(model, X, y, epsilon, pgd_alpha, 50, 10, 'l_inf', early_stop=True)
                 delta = delta.detach()
