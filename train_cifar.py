@@ -235,7 +235,7 @@ def main():
     epochs = args.epochs
 
     if args.lr_schedule == 'superconverge':
-        lr_schedule = lambda t: np.interp([t], [0, args.epochs * 2 // 5, args.epochs], [0, args.lr_max, 0])[0]
+        lr_schedule = lambda t: np.interp([t], [0, args.epochs // 2, args.epochs], [0, args.lr_max, 0])[0]
     elif args.lr_schedule == 'piecewise':
         def lr_schedule(t):
             if t < args.piecewise_lr_drop:
