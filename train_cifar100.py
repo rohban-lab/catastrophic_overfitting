@@ -18,13 +18,11 @@ import os
 from wideresnet import WideResNet
 from preactresnet import PreActResNet18
 
-from utils import *
+cifar100_mean = (0.5070751592371323, 0.48654887331495095, 0.4409178433670343)
+cifar100_std = (0.2673342858792401, 0.2564384629170883, 0.27615047132568404)
 
-svhn_mean = (0.5, 0.5, 0.5)
-svhn_std = (0.5, 0.5, 0.5)
-
-mu = torch.tensor(svhn_mean).view(3,1,1).cuda()
-std = torch.tensor(svhn_std).view(3,1,1).cuda()
+mu = torch.tensor(cifar100_mean).view(3,1,1).cuda()
+std = torch.tensor(cifar100_std).view(3,1,1).cuda()
 
 def normalize(X):
     return (X - mu)/std
@@ -34,24 +32,6 @@ upper_limit, lower_limit = 1, 0
 
 def clamp(X, lower_limit, upper_limit):
     return torch.max(torch.min(X, upper_limit), lower_limit)
-
-
-class Batches():
-    def __init__(self, dataset, batch_size, shuffle, set_random_choices=False, num_workers=0, drop_last=False):
-        self.dataset = dataset
-        self.batch_size = batch_size
-        self.set_random_choices = set_random_choices
-        self.dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=True, shuffle=shuffle, drop_last=drop_last
-        )
-
-    def __iter__(self):
-        if self.set_random_choices:
-            self.dataset.set_random_choices()
-        return ({'input': x.to(device).float(), 'target': y.to(device).long()} for (x,y) in self.dataloader)
-
-    def __len__(self):
-        return len(self.dataloader)
 
 def quantile_fgsm(model, X, y, epsilon, alpha, q_val, q_iters, fgsm_init):
     delta = torch.zeros_like(X)
@@ -157,22 +137,22 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='PreActResNet18')
     parser.add_argument('--batch-size', default=128, type=int)
-    parser.add_argument('--data-dir', default='../svhn-data', type=str)
+    parser.add_argument('--data-dir', default='../cifar100-data', type=str)
     parser.add_argument('--epochs', default=52, type=int)
     parser.add_argument('--lr-schedule', default='piecewise', choices=['superconverge', 'piecewise'])
     parser.add_argument('--piecewise-lr-drop', default=50, type=int)
-    parser.add_argument('--lr-max', default=0.01, type=float)
-    parser.add_argument('--attack', default='qfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
+    parser.add_argument('--lr-max', default=0.1, type=float)
+    parser.add_argument('--attack', default='cfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
     parser.add_argument('--epsilon', default=8, type=int)
     parser.add_argument('--pgd-alpha', default=2, type=float, help='pgd alpha WONT be multiplied by epsilon')
     parser.add_argument('--fgsm-alpha', default=2, type=float, help='fgsm alpha WILL be multiplied by epsilon')
     parser.add_argument('--c-samps', default=3, type=int, help='number of random samples for counsensus-fgsm')
     parser.add_argument('--c-th', default=-1, type=int, help='minimum number of same gradient directions to choose it in counsensus-fgsm')
     parser.add_argument('--c-parallel', action='store_true', help='turn on for better performance on multiple GPUs, turn off if facing memory problems')
-    parser.add_argument('--q-val', default=0.8, type=float, help='quantile which gradients would become zero in quantile-fgsm')
+    parser.add_argument('--q-val', default=0.4, type=float, help='quantile which gradients would become zero in quantile-fgsm')
     parser.add_argument('--q-iters', default=1, type=int, help='number of quantile-fgsm iterations')
     parser.add_argument('--fgsm-init', default='random', type=str, choices=['zero', 'random'])
-    parser.add_argument('--fname', default='svhn_model', type=str)
+    parser.add_argument('--fname', default='cifar100_model', type=str)
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--width-factor', default=10, type=int)
     parser.add_argument('--full-test', action='store_true', help='turn on to get test set evaluation in each epoch instead of validation set')
@@ -207,26 +187,27 @@ def main():
     torch.cuda.manual_seed(args.seed)
 
     train_transform = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(15),
         transforms.ToTensor(),
-        # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
     test_transform = transforms.Compose([
         transforms.ToTensor(),
-        # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
     num_workers = 2
-    train_dataset = datasets.SVHN(
-        args.data_dir, split='train', transform=train_transform, download=True)
-    test_dataset = datasets.SVHN(
-        args.data_dir, split='test', transform=test_transform, download=True)
-    train_batches = torch.utils.data.DataLoader(
+    train_dataset = datasets.CIFAR100(
+        args.data_dir, train=True, transform=train_transform, download=True)
+    test_dataset = datasets.CIFAR100(
+        args.data_dir, train=False, transform=test_transform, download=True)
+    train_loader = torch.utils.data.DataLoader(
         dataset=train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
         pin_memory=True,
         num_workers=num_workers,
     )
-    test_batches = torch.utils.data.DataLoader(
+    test_loader = torch.utils.data.DataLoader(
         dataset=test_dataset,
         batch_size=args.batch_size,
         shuffle=False,
@@ -238,13 +219,13 @@ def main():
     pgd_alpha = (args.pgd_alpha / 255.)
 
     if args.model == 'PreActResNet18':
-        model = PreActResNet18()
+        model = PreActResNet18(num_classes=100)
     elif args.model == 'WideResNet':
-        model = WideResNet(34, 10, widen_factor=args.width_factor, dropRate=0.0)
+        model = WideResNet(34, 100, widen_factor=args.width_factor, dropRate=0.0)
     else:
         raise ValueError("Unknown model")
 
-    model = nn.DataParallel(model).cuda()
+    model = model.cuda()
     model.train()
 
     params = model.parameters()
@@ -288,11 +269,11 @@ def main():
         train_robust_acc = 0
         train_n = 0
         defence_mean = 0
-        for i, (X, y) in enumerate(train_batches):
+        for i, (X, y) in enumerate(train_loader):
             if args.eval:
                 break
             X, y = X.cuda(), y.cuda()
-            lr = lr_schedule(epoch + (i + 1) / len(train_batches))
+            lr = lr_schedule(epoch + (i + 1) / len(train_loader))
             opt.param_groups[0].update(lr=lr)
 
             if args.attack == 'fgsm':
@@ -310,7 +291,7 @@ def main():
             opt.zero_grad()
             robust_loss.backward()
             opt.step()
-
+            
             train_robust_loss += robust_loss.item() * y.size(0)
             train_robust_acc += (robust_output.max(1)[1] == y).sum().item()
             train_n += y.size(0)
@@ -326,9 +307,9 @@ def main():
         test_n = 0
         attack_mean = 0
         if not epoch+1==epochs and not args.full_test:
-            cur_dataset = train_batches
+            cur_dataset = train_loader
         else :
-            cur_dataset = test_batches
+            cur_dataset = test_loader
         for i, (X, y) in enumerate(cur_dataset):
             if not epoch+1==epochs and not args.full_test and i > len(cur_dataset) / 50:
                 break
@@ -389,7 +370,7 @@ def main():
             test_robust_loss = 0
             test_robust_acc = 0
             test_n = 0
-            for i, (X, y) in enumerate(test_batches):
+            for i, (X, y) in enumerate(test_loader):
                 X, y = X.cuda(), y.cuda()
 
                 delta = attack_pgd(model, X, y, epsilon, pgd_alpha, 50, 10, 'l_inf', early_stop=True)
