@@ -158,8 +158,8 @@ def get_args():
     parser.add_argument('--model', default='PreActResNet18')
     parser.add_argument('--batch-size', default=128, type=int)
     parser.add_argument('--data-dir', default='../svhn-data', type=str)
-    parser.add_argument('--epochs', default=52, type=int)
-    parser.add_argument('--lr-schedule', default='piecewise', choices=['superconverge', 'piecewise'])
+    parser.add_argument('--epochs', default=15, type=int)
+    parser.add_argument('--lr-schedule', default='superconverge', choices=['superconverge', 'piecewise'])
     parser.add_argument('--piecewise-lr-drop', default=50, type=int)
     parser.add_argument('--lr-max', default=0.01, type=float)
     parser.add_argument('--attack', default='qfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
@@ -169,17 +169,17 @@ def get_args():
     parser.add_argument('--c-samps', default=3, type=int, help='number of random samples for counsensus-fgsm')
     parser.add_argument('--c-th', default=-1, type=int, help='minimum number of same gradient directions to choose it in counsensus-fgsm')
     parser.add_argument('--c-parallel', action='store_true', help='turn on for better performance on multiple GPUs, turn off if facing memory problems')
-    parser.add_argument('--q-val', default=0.8, type=float, help='quantile which gradients would become zero in quantile-fgsm')
+    parser.add_argument('--q-val', default=0.7, type=float, help='quantile which gradients would become zero in quantile-fgsm')
     parser.add_argument('--q-iters', default=1, type=int, help='number of quantile-fgsm iterations')
     parser.add_argument('--fgsm-init', default='random', type=str, choices=['zero', 'random'])
     parser.add_argument('--fname', default='svhn_model', type=str)
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--width-factor', default=10, type=int)
-    parser.add_argument('--full-test', action='store_true', help='turn on to get test set evaluation in each epoch instead of validation set')
+    parser.add_argument('--full-test', default=True, help='turn on to get test set evaluation in each epoch instead of validation set')
     parser.add_argument('--test-iters', default=10, type=int, help='number of pgd steps used in evaluation during training')
     parser.add_argument('--test-restarts', default=1, type=int, help='number of pgd restarts used in evaluation during training')
     parser.add_argument('--resume', default=0, type=int)
-    parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--eval', default=False, type=bool)
     parser.add_argument('--chkpt-iters', default=10, type=int)
     return parser.parse_args()
 
@@ -254,7 +254,7 @@ def main():
     epochs = args.epochs
 
     if args.lr_schedule == 'superconverge':
-        lr_schedule = lambda t: np.interp([t], [0, args.epochs // 2, args.epochs], [0, args.lr_max, 0])[0]
+        lr_schedule = lambda t: np.interp([t], [0, args.epochs * 2 // 5, args.epochs], [0, args.lr_max, 0])[0]
     elif args.lr_schedule == 'piecewise':
         def lr_schedule(t):
             if t < args.piecewise_lr_drop:
@@ -279,8 +279,8 @@ def main():
             logger.info("No model loaded to evaluate, specify with --resume FNAME")
             return
         logger.info("[Evaluation mode]")
-
-    logger.info('Epoch \t Train Time \t Test Time \t LR \t \t Train Robust Loss \t Train Robust Acc \t Test Loss \t Test Acc \t Test Robust Loss \t Test Robust Acc \t Defence Mean \t Attack Mean')
+    
+    logger.info('Epoch \t Train Time \t Test Time \t LR \t \t Train Robust Loss \t Train Robust Acc \t Test Loss \t Test Acc \t Test Robust Loss \t Test Robust Acc \t Val Robust Acc \t Defence Mean \t Attack Mean')
     for epoch in range(start_epoch, epochs):
         model.train()
         start_time = time.time()
@@ -302,7 +302,7 @@ def main():
             elif args.attack == 'qfgsm':
                 delta = quantile_fgsm(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.q_val, args.q_iters, args.fgsm_init)
             elif args.attack == 'pgd':
-                delta = attack_pgd(model, X, y, epsilon, pgd_alpha, 10, 1, 'l_inf')
+                delta = attack_pgd(model, X, y, epsilon, pgd_alpha, 2, 1, 'l_inf')
             delta = delta.detach()
             robust_output = model(normalize(torch.clamp(X + delta[:X.size(0)], min=lower_limit, max=upper_limit)))
             robust_loss = criterion(robust_output, y)
@@ -325,11 +325,37 @@ def main():
         test_robust_acc = 0
         test_n = 0
         attack_mean = 0
+        val_robust_acc = 0
+        val_n = 0
+
+        
+        cur_dataset = train_batches
+        for i, (X, y) in enumerate(cur_dataset):
+            if i > len(cur_dataset) / 50:
+                break
+            X, y = X.cuda(), y.cuda()
+
+            delta = attack_pgd(model, X, y, epsilon, pgd_alpha, args.test_iters, args.test_restarts, 'l_inf', early_stop=args.eval)
+            delta = delta.detach()
+
+            robust_output = model(normalize(torch.clamp(X + delta[:X.size(0)], min=lower_limit, max=upper_limit)))
+            robust_loss = criterion(robust_output, y)
+
+            output = model(normalize(X))
+            loss = criterion(output, y)
+
+            val_robust_acc += (robust_output.max(1)[1] == y).sum().item()
+            val_n += y.size(0)
+            
+
+
         if not epoch+1==epochs and not args.full_test:
             cur_dataset = train_batches
         else :
             cur_dataset = test_batches
         for i, (X, y) in enumerate(cur_dataset):
+            if args.eval:
+              break
             if not epoch+1==epochs and not args.full_test and i > len(cur_dataset) / 50:
                 break
             X, y = X.cuda(), y.cuda()
@@ -354,10 +380,10 @@ def main():
 
         
         if not args.eval:
-            logger.info('%d \t %.1f \t \t %.1f \t \t %.4f \t %.4f \t \t %.4f \t \t %.4f \t %.4f \t %.4f \t \t %.4f \t \t %.4f \t %.4f',
+            logger.info('%d \t %.1f \t \t %.1f \t \t %.4f \t %.4f \t \t %.4f \t \t %.4f \t %.4f \t %.4f \t \t %.4f \t %.4f \t \t %.4f \t %.4f',
                 epoch, train_time - start_time, test_time - train_time, lr,
                 train_robust_loss/train_n, train_robust_acc/train_n,
-                test_loss/test_n, test_acc/test_n, test_robust_loss/test_n, test_robust_acc/test_n,
+                test_loss/test_n, test_acc/test_n, test_robust_loss/test_n, test_robust_acc/test_n, val_robust_acc/val_n,
                 defence_mean*255/train_n, attack_mean*255/test_n)
 
             # save checkpoint
@@ -366,23 +392,30 @@ def main():
                 torch.save(opt.state_dict(), os.path.join(args.fname, f'opt_{epoch}.pth'))
 
             # save best
-            if test_robust_acc/test_n > best_test_robust_acc:
+            if val_robust_acc/val_n > best_test_robust_acc:
+                best_epoch = epoch
                 torch.save({
                         'state_dict':model.state_dict(),
+                        'best_val_acc':val_robust_acc/val_n,
                         'test_robust_acc':test_robust_acc/test_n,
                         'test_robust_loss':test_robust_loss/test_n,
                         'test_loss':test_loss/test_n,
                         'test_acc':test_acc/test_n,
                     }, os.path.join(args.fname, f'model_best.pth'))
-                best_test_robust_acc = test_robust_acc/test_n
+                best_test_robust_acc = val_robust_acc/val_n
         else:
-            logger.info('%d \t %.1f \t \t %.1f \t \t %.4f \t %.4f \t \t %.4f \t \t %.4f \t %.4f \t %.4f \t \t %.4f \t \t %.4f \t %.4f',
+            logger.info('%d \t %.1f \t \t %.1f \t \t %.4f \t %.4f \t \t %.4f \t \t %.4f \t %.4f \t %.4f \t \t \t %.4f \t \t %.4f \t %.4f',
                 epoch, train_time - start_time, test_time - train_time, -1,
                 -1, -1,
                 test_loss/test_n, test_acc/test_n, test_robust_loss/test_n, test_robust_acc/test_n,
                 -1, attack_mean*255/test_n)
-                
+        
+        
         if args.eval or epoch+1 == epochs:
+            logger.info(f'Loading best model from epoch {best_epoch}')
+            logger.info('Performing PGD50 test, this will take a while...')
+            model.load_state_dict(torch.load(os.path.join(args.fname, f'model_best.pth'))['state_dict'])   
+    
             start_test_time = time.time()
             test_loss = 0
             test_acc = 0
@@ -391,10 +424,12 @@ def main():
             test_n = 0
             for i, (X, y) in enumerate(test_batches):
                 X, y = X.cuda(), y.cuda()
-
+                
+                if (i+1) %10 == 0:
+                  logger.info("batch %d out of %d", (i+1), len(test_batches))
                 delta = attack_pgd(model, X, y, epsilon, pgd_alpha, 50, 10, 'l_inf', early_stop=True)
                 delta = delta.detach()
-
+                
                 robust_output = model(normalize(torch.clamp(X + delta[:X.size(0)], min=lower_limit, max=upper_limit)))
                 robust_loss = criterion(robust_output, y)
 
