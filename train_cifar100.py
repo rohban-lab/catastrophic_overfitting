@@ -139,7 +139,7 @@ def get_args():
     parser.add_argument('--batch-size', default=128, type=int)
     parser.add_argument('--data-dir', default='../cifar100-data', type=str)
     parser.add_argument('--epochs', default=52, type=int)
-    parser.add_argument('--lr-schedule', default='piecewise', choices=['superconverge', 'piecewise'])
+    parser.add_argument('--lr-schedule', default='piecewise', choices=['cyclic', 'piecewise'])
     parser.add_argument('--piecewise-lr-drop', default=50, type=int)
     parser.add_argument('--lr-max', default=0.1, type=float)
     parser.add_argument('--attack', default='cfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
@@ -234,7 +234,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     epochs = args.epochs
 
-    if args.lr_schedule == 'superconverge':
+    if args.lr_schedule == 'cyclic':
         lr_schedule = lambda t: np.interp([t], [0, args.epochs // 2, args.epochs], [0, args.lr_max, 0])[0]
     elif args.lr_schedule == 'piecewise':
         def lr_schedule(t):
@@ -306,12 +306,8 @@ def main():
         test_robust_acc = 0
         test_n = 0
         attack_mean = 0
-        if not epoch+1==epochs and not args.full_test:
-            cur_dataset = train_loader
-        else :
-            cur_dataset = test_loader
-        for i, (X, y) in enumerate(cur_dataset):
-            if not epoch+1==epochs and not args.full_test and i > len(cur_dataset) / 50:
+        for i, (X, y) in enumerate(test_loader):
+            if not epoch+1==epochs and not args.full_test and i > len(test_loader) / 10:
                 break
             X, y = X.cuda(), y.cuda()
 

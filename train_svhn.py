@@ -159,7 +159,7 @@ def get_args():
     parser.add_argument('--batch-size', default=128, type=int)
     parser.add_argument('--data-dir', default='../svhn-data', type=str)
     parser.add_argument('--epochs', default=15, type=int)
-    parser.add_argument('--lr-schedule', default='superconverge', choices=['superconverge', 'piecewise'])
+    parser.add_argument('--lr-schedule', default='superconverge', choices=['cyclic', 'piecewise'])
     parser.add_argument('--piecewise-lr-drop', default=50, type=int)
     parser.add_argument('--lr-max', default=0.01, type=float)
     parser.add_argument('--attack', default='qfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
@@ -253,7 +253,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     epochs = args.epochs
 
-    if args.lr_schedule == 'superconverge':
+    if args.lr_schedule == 'cyclic':
         lr_schedule = lambda t: np.interp([t], [0, args.epochs * 2 // 5, args.epochs], [0, args.lr_max, 0])[0]
     elif args.lr_schedule == 'piecewise':
         def lr_schedule(t):
