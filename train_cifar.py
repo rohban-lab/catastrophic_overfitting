@@ -158,8 +158,8 @@ def get_args():
     parser.add_argument('--batch-size', default=128, type=int)
     parser.add_argument('--data-dir', default='../cifar-data', type=str)
     parser.add_argument('--epochs', default=52, type=int)
-    parser.add_argument('--lr-schedule', default='piecewise', choices=['cyclic', 'piecewise'])
-    parser.add_argument('--piecewise-lr-drop', default=50, type=int)
+    parser.add_argument('--lr-schedule', default='onedrop', choices=['cyclic', 'onedrop'])
+    parser.add_argument('--lr-drop', default=50, type=int)
     parser.add_argument('--lr-max', default=0.1, type=float)
     parser.add_argument('--attack', default='cfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
     parser.add_argument('--epsilon', default=8, type=int)
@@ -236,9 +236,9 @@ def main():
 
     if args.lr_schedule == 'cyclic':
         lr_schedule = lambda t: np.interp([t], [0, args.epochs // 2, args.epochs], [0, args.lr_max, 0])[0]
-    elif args.lr_schedule == 'piecewise':
+    elif args.lr_schedule == 'onedrop':
         def lr_schedule(t):
-            if t < args.piecewise_lr_drop:
+            if t < args.lr_drop:
                 return args.lr_max
             else:
                 return args.lr_max / 10.
