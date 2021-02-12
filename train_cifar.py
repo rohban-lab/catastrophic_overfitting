@@ -52,7 +52,7 @@ class Batches():
     def __len__(self):
         return len(self.dataloader)
 
-def quantile_fgsm(model, X, y, epsilon, alpha, q_val, q_iters, fgsm_init):
+def zero_grad(model, X, y, epsilon, alpha, q_val, q_iters, fgsm_init):
     delta = torch.zeros_like(X)
     if fgsm_init=='random':
         delta.uniform_(-epsilon, epsilon)
@@ -69,7 +69,7 @@ def quantile_fgsm(model, X, y, epsilon, alpha, q_val, q_iters, fgsm_init):
         delta = delta.detach()
     return delta.detach()
 
-def consensus_fgsm(model, X, y, epsilon, alpha, samples, zeroing_th=-1, parallel=True):
+def multi_grad(model, X, y, epsilon, alpha, samples, zeroing_th=-1, parallel=True):
     if zeroing_th==-1:
         zeroing_th = samples
     if parallel:
@@ -161,15 +161,15 @@ def get_args():
     parser.add_argument('--lr-schedule', default='onedrop', choices=['cyclic', 'onedrop'])
     parser.add_argument('--lr-drop', default=50, type=int)
     parser.add_argument('--lr-max', default=0.1, type=float)
-    parser.add_argument('--attack', default='cfgsm', type=str, choices=['cfgsm', 'qfgsm', 'fgsm', 'pgd'])
+    parser.add_argument('--attack', default='multigrad', type=str, choices=['multigrad', 'zerograd', 'fgsm', 'pgd'])
     parser.add_argument('--epsilon', default=8, type=int)
     parser.add_argument('--pgd-alpha', default=2, type=float, help='pgd alpha WONT be multiplied by epsilon')
     parser.add_argument('--fgsm-alpha', default=2, type=float, help='fgsm alpha WILL be multiplied by epsilon')
-    parser.add_argument('--c-samps', default=3, type=int, help='number of random samples for counsensus-fgsm')
-    parser.add_argument('--c-th', default=-1, type=int, help='minimum number of same gradient directions to choose it in counsensus-fgsm')
-    parser.add_argument('--c-parallel', action='store_true', help='turn on for better performance on multiple GPUs, turn off if facing memory problems')
-    parser.add_argument('--q-val', default=0.4, type=float, help='quantile which gradients would become zero in quantile-fgsm')
-    parser.add_argument('--q-iters', default=1, type=int, help='number of quantile-fgsm iterations')
+    parser.add_argument('--multi-samps', default=3, type=int, help='number of random samples for multigrad')
+    parser.add_argument('--multi-th', default=-1, type=int, help='minimum number of same gradient directions to choose it in multigrad, -1 for th=samps')
+    parser.add_argument('--multi-parallel', action='store_true', help='turn on for better performance on multiple GPUs, turn off if facing memory problems')
+    parser.add_argument('--zero-qval', default=0.35, type=float, help='quantile which gradients would become zero in zerograd')
+    parser.add_argument('--zero-iters', default=1, type=int, help='number of zerograd iterations')
     parser.add_argument('--fgsm-init', default='random', type=str, choices=['zero', 'random'])
     parser.add_argument('--fname', default='cifar_model', type=str)
     parser.add_argument('--seed', default=0, type=int)
@@ -278,10 +278,10 @@ def main():
 
             if args.attack == 'fgsm':
                 delta = attack_pgd(model, X, y, epsilon, args.fgsm_alpha * epsilon, 1, 1, 'l_inf', fgsm_init=args.fgsm_init)
-            elif args.attack == 'cfgsm':
-                delta = consensus_fgsm(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.c_samps, args.c_th, args.c_parallel)
-            elif args.attack == 'qfgsm':
-                delta = quantile_fgsm(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.q_val, args.q_iters, args.fgsm_init)
+            elif args.attack == 'multigrad':
+                delta = multi_grad(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.multi_samps, args.multi_th, args.multi_parallel)
+            elif args.attack == 'zerograd':
+                delta = zero_grad(model, X, y, epsilon, args.fgsm_alpha * epsilon, args.zero_qval, args.zero_iters, args.fgsm_init)
             elif args.attack == 'pgd':
                 delta = attack_pgd(model, X, y, epsilon, pgd_alpha, 10, 1, 'l_inf')
             delta = delta.detach()
